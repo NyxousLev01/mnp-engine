@@ -7,7 +7,9 @@
 </div>
 <br>
 
-Luanti is a free open-source voxel game engine with easy modding and game creation.
+LNN Engine is a free, open-source voxel game engine built for rapid prototyping and modding, tailored for Nyxous’ proprietary game projects.
+
+Changes by: Nyxous Dmitri
 
 Copyright (C) 2010-2025 Perttu Ahola <celeron55@gmail.com>
 and contributors (see source file comments and the version control log)
