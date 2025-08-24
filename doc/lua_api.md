@@ -177,8 +177,6 @@ The file is a key-value store of modpack details.
 * `textdomain`: Textdomain used to translate title and description. Defaults to modpack name.
   See [Translating content meta](#translating-content-meta).
 
-Note: to support 0.4.x, please also create an empty modpack.txt file.
-
 Mod directory structure
 -----------------------
 
@@ -284,6 +282,9 @@ Accepted formats are:
     models: .x, .b3d, .obj, (since version 5.10:) .gltf, .glb
     fonts: .ttf, .woff (both since version 5.11, see notes below)
 
+Currently the engine is unable to handle files over ~16MB in size. For best
+performance you should keep your media files as small as reasonably possible.
+
 Other formats won't be sent to the client (e.g. you can store .blend files
 in a folder for convenience, without the risk that such files are transferred)
 
@@ -305,10 +306,6 @@ Simple textured meshes (with multiple textures), optionally with normals.
 The .x, .b3d and .gltf formats additionally support (a single) animation.
 
 #### glTF
-
-The glTF model file format for now only serves as a
-more modern alternative to the other static model file formats;
-it unlocks no special rendering features.
 
 Binary glTF (`.glb`) files are supported and recommended over `.gltf` files
 due to their space savings.
@@ -2852,6 +2849,8 @@ Version History
 * Formspec version 9 (5.12.0)
   * Add allow_close[]
   * label[]: Add "area label" variant
+* Formspec version 10 (5.13.0)
+  * model[]: Support floating-point frames
 
 Elements
 --------
@@ -3935,6 +3934,32 @@ The following functions provide escape sequences:
     * Removes all color escape sequences.
 
 
+Coordinate System
+=================
+
+Luanti uses a **left-handed** coordinate system: Y is "up", X is "right", Z is "forward".
+This is the convention used by Unity, DirectX and Irrlicht.
+It means that when you're pointing in +Z direction in-game ("forward"), +X is to your right; +Y is up.
+
+Consistently, rotation is [**left-handed**](https://en.wikipedia.org/w/index.php?title=Right-hand_rule) as well.
+Luanti uses [Tait-Bryan angles](https://en.wikipedia.org/wiki/Euler_angles#Tait%E2%80%93Bryan_angles) for rotations,
+often referred to simply as "euler angles" (even though they are not "proper" euler angles).
+The rotation order is extrinsic X-Y-Z:
+First rotation around the (unrotated) X-axis is applied,
+then rotation around the (unrotated) Y-axis follows,
+and finally rotation around the (unrotated) Z-axis is applied.
+(Note: As a product of rotation matrices, this will be written in reverse, so `Z*Y*X`.)
+
+Attachment and bone override rotations both use these conventions.
+
+There is an exception, however: Object rotation (`ObjectRef:set_rotation`, `ObjectRef:get_rotation`, `automatic_rotate`)
+**does not** use left-handed (extrinsic) X-Y-Z rotations.
+Instead, it uses **right-handed (extrinsic) Z-X-Y** rotations:
+First roll (Z) is applied, then pitch (X); yaw (Y) is applied last.
+
+See [Scratchapixel](https://www.scratchapixel.com/lessons/mathematics-physics-for-computer-graphics/geometry/coordinate-systems.html)
+or [Wikipedia](https://en.wikipedia.org/wiki/Cartesian_coordinate_system#Orientation_and_handedness)
+for a more detailed and pictorial explanation of these terms.
 
 
 Spatial Vectors
@@ -4134,6 +4159,7 @@ angles in radians.
 
 * `vector.rotate(v, r)`:
     * Applies the rotation `r` to `v` and returns the result.
+    * Uses (extrinsic) Z-X-Y rotation order and is right-handed, consistent with `ObjectRef:set_rotation`.
     * `vector.rotate(vector.new(0, 0, 1), r)` and
       `vector.rotate(vector.new(0, 1, 0), r)` return vectors pointing
       forward and up relative to an entity's rotation `r`.
@@ -5813,6 +5839,8 @@ Utilities
       httpfetch_additional_methods = true,
       -- objects have get_guid method (5.13.0)
       object_guids = true,
+      -- The NodeTimer `on_timer` callback is passed additional `node` and `timeout` args (5.14.0)
+      on_timer_four_args = true,
   }
   ```
 
@@ -5820,6 +5848,7 @@ Utilities
     * checks for *server-side* feature availability
     * `arg`: string or table in format `{foo=true, bar=true}`
     * `missing_features`: `{foo=true, bar=true}`
+
 * `core.get_player_information(player_name)`: Table containing information
   about a player. Example return value:
 
@@ -5895,8 +5924,8 @@ Utilities
       },
 
       -- Estimated maximum formspec size before Luanti will start shrinking the
-      -- formspec to fit. For a fullscreen formspec, use this formspec size and
-      -- `padding[0,0]`. `bgcolor[;true]` is also recommended.
+      -- formspec to fit. For a fullscreen formspec, use the size returned by
+      -- this table  and `padding[0,0]`. `bgcolor[;true]` is also recommended.
       max_formspec_size = {
           x = 20,
           y = 11.25
@@ -6120,34 +6149,34 @@ Call these functions only at load time!
     * Called every server step, usually interval of 0.1s.
     * `dtime` is the time since last execution in seconds.
 * `core.register_on_mods_loaded(function())`
-    * Called after mods have finished loading and before the media is cached or the
-      aliases handled.
+    * Called after all mods have finished loading and before the media is cached
+      or aliases are handled.
 * `core.register_on_shutdown(function())`
-    * Called before server shutdown
-    * Players that were kicked by the shutdown procedure are still fully accessible
-     in `core.get_connected_players()`.
+    * Called during server shutdown before players are kicked.
     * **Warning**: If the server terminates abnormally (i.e. crashes), the
-      registered callbacks **will likely not be run**. Data should be saved at
+      registered callbacks will likely **not run**. Data should be saved at
       semi-frequent intervals as well as on server shutdown.
 * `core.register_on_placenode(function(pos, newnode, placer, oldnode, itemstack, pointed_thing))`
-    * Called when a node has been placed
-    * If return `true` no item is taken from `itemstack`
+    * Called after a node has been placed.
+    * If `true` is returned no item is taken from `itemstack`
     * `placer` may be any valid ObjectRef or nil.
     * **Not recommended**; use `on_construct` or `after_place_node` in node
       definition whenever possible.
 * `core.register_on_dignode(function(pos, oldnode, digger))`
-    * Called when a node has been dug.
+    * Called after a node has been dug.
     * **Not recommended**; Use `on_destruct` or `after_dig_node` in node
       definition whenever possible.
 * `core.register_on_punchnode(function(pos, node, puncher, pointed_thing))`
     * Called when a node is punched
 * `core.register_on_generated(function(minp, maxp, blockseed))`
-    * Called after generating a piece of world between `minp` and `maxp`.
+    * Called after a piece of world between `minp` and `maxp` has been
+      generated and written into the map.
     * **Avoid using this** whenever possible. As with other callbacks this blocks
-      the main thread and introduces noticeable latency.
-      Consider [Mapgen environment](#mapgen-environment) for an alternative.
-* `core.register_on_newplayer(function(ObjectRef))`
+      the main thread and is prone to introduce noticeable latency/lag.
+      Consider [Mapgen environment](#mapgen-environment) as an alternative.
+* `core.register_on_newplayer(function(player))`
     * Called when a new player enters the world for the first time
+    * `player`: ObjectRef
 * `core.register_on_punchplayer(function(player, hitter, time_from_last_punch, tool_capabilities, dir, damage))`
     * Called when a player is punched
     * Note: This callback is invoked even if the punched player is dead.
@@ -7088,8 +7117,12 @@ Defaults for the `on_place` and `on_drop` item definition functions
 * `core.item_pickup(itemstack, picker, pointed_thing, time_from_last_punch, ...)`
     * Runs callbacks registered by `core.register_on_item_pickup` and adds
       the item to the picker's `"main"` inventory list.
-    * Parameters are the same as in `on_pickup`.
-    * Returns the leftover itemstack.
+    * Parameters and return value are the same as `on_pickup`.
+    * **Note**: is not called when wielded item overrides `on_pickup`
+* `core.item_secondary_use(itemstack, user)`
+    * Global secondary use callback. Does nothing.
+    * Parameters and return value are the same as `on_secondary_use`.
+    * **Note**: is not called when wielded item overrides `on_secondary_use`
 * `core.item_drop(itemstack, dropper, pos)`
     * Converts `itemstack` to an in-world Lua entity.
     * `itemstack` (`ItemStack`) is modified (cleared) on success.
@@ -7112,7 +7145,7 @@ Defaults for the `on_punch` and `on_dig` node definition callbacks
     * Calls functions registered by `core.register_on_punchnode()`
 * `core.node_dig(pos, node, digger)`
     * Checks if node can be dug, puts item into inventory, removes node
-    * Calls functions registered by `core.registered_on_dignodes()`
+    * Calls functions registered by `core.register_on_dignode()`
 
 Sounds
 ------
@@ -8506,9 +8539,9 @@ child will follow movement and rotation of that bone.
         * `interpolation`: The old and new overrides are interpolated over this timeframe (in seconds).
         * `absolute`: If set to `false` (which is the default),
           the override will be relative to the animated property:
-            * Translation in the case of `position`;
-            * Composition in the case of `rotation`;
-            * Per-axis multiplication in the case of `scale`
+          * Translation in the case of `position`;
+          * Composition in the case of `rotation`;
+          * Per-axis multiplication in the case of `scale`
     * `property = nil` is equivalent to no override on that property
     * **Note:** Unlike `set_bone_position`, the rotation is in radians, not degrees.
     * Compatibility note: Clients prior to 5.9.0 only support absolute position and rotation.
@@ -8589,9 +8622,10 @@ child will follow movement and rotation of that bone.
     * `acc` is a vector
 * `get_acceleration()`: returns the acceleration, a vector
 * `set_rotation(rot)`
-    * Sets the rotation
     * `rot` is a vector (radians). X is pitch (elevation), Y is yaw (heading)
       and Z is roll (bank).
+    * Sets the **right-handed Z-X-Y** rotation:
+      First roll (Z) is applied, then pitch (X); yaw (Y) is applied last.
     * Does not reset rotation incurred through `automatic_rotate`.
       Remove & re-add your objects to force a certain rotation.
 * `get_rotation()`: returns the rotation, a vector (radians)
@@ -9506,7 +9540,7 @@ Player properties need to be saved manually.
     -- (see node sound definition for details).
 
     automatic_rotate = 0,
-    -- Set constant rotation in radians per second, positive or negative.
+    -- Set constant right-handed rotation in radians per second, positive or negative.
     -- Object rotates along the local Y-axis, and works with set_rotation.
     -- Set to 0 to disable constant rotation.
 
@@ -9959,15 +9993,15 @@ Used by `core.register_node`, `core.register_craftitem`, and
         -- When item is eaten with `core.do_item_eat`
 
         punch_use = <SimpleSoundSpec>,
-        -- When item is used with the 'punch/mine' key pointing at a node or entity
+        -- When item is used with the 'punch/dig' key pointing at a node or entity
 
         punch_use_air = <SimpleSoundSpec>,
-        -- When item is used with the 'punch/mine' key pointing at nothing (air)
+        -- When item is used with the 'punch/dig' key pointing at nothing (air)
     },
 
     on_place = function(itemstack, placer, pointed_thing),
-    -- When the 'place' key was pressed with the item in hand
-    -- and a node was pointed at.
+    -- Called when the 'place' key was pressed with the item in hand
+    -- and pointing at a node.
     -- Shall place item and return the leftover itemstack
     -- or nil to not modify the inventory.
     -- The placer may be any ObjectRef or nil.
@@ -9978,7 +10012,7 @@ Used by `core.register_node`, `core.register_craftitem`, and
     -- Function must return either nil if inventory shall not be modified,
     -- or an itemstack to replace the original itemstack.
     -- The user may be any ObjectRef or nil.
-    -- default: nil
+    -- default: core.item_secondary_use
 
     on_drop = function(itemstack, dropper, pos),
     -- Shall drop item and return the leftover itemstack.
@@ -9996,28 +10030,26 @@ Used by `core.register_node`, `core.register_craftitem`, and
     --   luaentity) as `type="object"` `pointed_thing`.
     -- * `time_from_last_punch, ...` (optional): Other parameters from
     --   `luaentity:on_punch`.
-    -- default: `core.item_pickup`
+    -- default: core.item_pickup
 
     on_use = function(itemstack, user, pointed_thing),
-    -- default: nil
-    -- When user pressed the 'punch/mine' key with the item in hand.
+    -- Called when user presses the 'punch/dig' key with the item in hand.
     -- Function must return either nil if inventory shall not be modified,
     -- or an itemstack to replace the original itemstack.
     -- e.g. itemstack:take_item(); return itemstack
-    -- Otherwise, the function is free to do what it wants.
     -- The user may be any ObjectRef or nil.
-    -- The default functions handle regular use cases.
+    -- Note that defining this callback will prevent normal punching/digging
+    -- behavior on the client, as the interaction is instead "forwarded" to the
+    -- server.
+    -- default: nil
 
     after_use = function(itemstack, user, node, digparams),
-    -- default: nil
-    -- If defined, should return an itemstack and will be called instead of
-    -- wearing out the item (if tool). If returns nil, does nothing.
-    -- If after_use doesn't exist, it is the same as:
-    --   function(itemstack, user, node, digparams)
-    --     itemstack:add_wear(digparams.wear)
-    --     return itemstack
-    --   end
+    -- Called after a tool is used to dig a node and will replace the default
+    -- tool wear-out handling.
+    -- Shall return the leftover itemstack or nil to not
+    -- modify the dropped item.
     -- The user may be any ObjectRef or nil.
+    -- default: nil
 
     _custom_field = whatever,
     -- Add your own custom fields. By convention, all custom field names
@@ -10441,8 +10473,6 @@ Used by `core.register_node`.
     -- itemstack will hold clicker's wielded item.
     -- Shall return the leftover itemstack.
     -- Note: pointed_thing can be nil, if a mod calls this function.
-    -- This function does not get triggered by clients <=0.4.16 if the
-    -- "formspec" node metadata field is set.
 
     on_dig = function(pos, node, digger),
     -- default: core.node_dig
@@ -10450,10 +10480,12 @@ Used by `core.register_node`.
     -- return true if the node was dug successfully, false otherwise.
     -- Deprecated: returning nil is the same as returning true.
 
-    on_timer = function(pos, elapsed),
+    on_timer = function(pos, elapsed, node, timeout),
     -- default: nil
     -- called by NodeTimers, see core.get_node_timer and NodeTimerRef.
-    -- elapsed is the total time passed since the timer was started.
+    -- `elapsed`: total time passed since the timer was started.
+    -- `node`: node table (since 5.14)
+    -- `timeout`: timeout value of the just ended timer (since 5.14)
     -- return true to run the timer for another cycle with the same timeout
     -- value.
 
